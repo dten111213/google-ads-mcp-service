@@ -17,7 +17,7 @@ class AutomatedTokenManager {
     this.oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_ADS_CLIENT_ID,
       process.env.GOOGLE_ADS_CLIENT_SECRET,
-      'http://localhost:3000/auth/callback'
+      'https://google-ads-mcp-service-production.up.railway.app/auth/callback'
     );
 
     this.tokensFile = './tokens.json';
@@ -45,6 +45,25 @@ class AutomatedTokenManager {
       scope: ['https://www.googleapis.com/auth/adwords'],
       prompt: 'consent'
     });
+
+    console.log('\n=== INITIAL SETUP REQUIRED ===');
+    console.log('1. Visit this URL:', authUrl);
+    console.log('2. After approval, you\'ll be redirected to Railway with a code in the URL');
+    console.log('3. Copy the "code=" parameter from the URL');
+    console.log('4. Set it as INITIAL_AUTH_CODE environment variable');
+    console.log('5. Restart the server');
+    console.log('================================\n');
+
+    if (process.env.INITIAL_AUTH_CODE) {
+      const { tokens } = await this.oauth2Client.getToken(process.env.INITIAL_AUTH_CODE);
+      await this.saveTokens(tokens);
+      this.oauth2Client.setCredentials(tokens);
+      console.log('🎉 Initial authentication complete!');
+      console.log('ℹ️ You can now remove INITIAL_AUTH_CODE from environment variables');
+    } else {
+      throw new Error('Initial authentication required - check logs for setup instructions');
+    }
+  }
 
     console.log('\n=== INITIAL SETUP REQUIRED ===');
     console.log('1. Visit this URL:', authUrl);
