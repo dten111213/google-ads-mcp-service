@@ -1,0 +1,22 @@
+{
+  "name": "google-ads-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for Google Ads API integration",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --inspect index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.4.0",
+    "google-ads-api": "^11.0.0",
+    "googleapis": "^131.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "bin": {
+    "google-ads-mcp-server": "./index.js"
+  }
+}
