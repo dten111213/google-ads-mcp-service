@@ -11,6 +11,8 @@ import {
 import { GoogleAdsApi } from 'google-ads-api';
 import { google } from 'googleapis';
 import fs from 'fs/promises';
+import express from 'express';
+import cors from 'cors';
 
 class AutomatedTokenManager {
   constructor() {
@@ -48,9 +50,10 @@ class AutomatedTokenManager {
 
     console.log('\n=== INITIAL SETUP REQUIRED ===');
     console.log('1. Visit this URL:', authUrl);
-    console.log('2. Copy the authorization code you receive');
-    console.log('3. Set it as INITIAL_AUTH_CODE environment variable');
-    console.log('4. Restart the server');
+    console.log('2. Sign in and grant permissions');
+    console.log('3. You will see a page with an authorization code');
+    console.log('4. Copy that code and set it as INITIAL_AUTH_CODE environment variable');
+    console.log('5. Restart the server');
     console.log('================================\n');
 
     if (process.env.INITIAL_AUTH_CODE) {
@@ -353,9 +356,84 @@ class GoogleAdsMCPServer {
       console.log('📝 Server will retry initialization on first tool call');
     }
 
+    // Start HTTP server for Claude Projects
+    await this.startHttpServer();
+
+    // Start stdio server for Claude Desktop
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error("🚀 Google Ads MCP server running on stdio");
+    console.error("🚀 Google Ads MCP server running on stdio and HTTP");
+  }
+
+  async startHttpServer() {
+    const app = express();
+    app.use(cors());
+    app.use(express.json());
+
+    // Health check endpoint
+    app.get('/health', (req, res) => {
+      res.json({ status: 'ok', message: 'Google Ads MCP Server is running' });
+    });
+
+    // MCP endpoint for Claude Projects
+    app.post('/mcp', async (req, res) => {
+      try {
+        const { method, params } = req.body;
+        
+        if (method === 'tools/list') {
+          const tools = await this.server.getRequestHandler(ListToolsRequestSchema)();
+          res.json(tools);
+        } else if (method === 'tools/call') {
+          const result = await this.server.getRequestHandler(CallToolRequestSchema)(params);
+          res.json(result);
+        } else {
+          res.status(400).json({ error: 'Unknown method' });
+        }
+      } catch (error) {
+        console.error('HTTP request error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Google Ads API endpoints for direct HTTP access
+    app.get('/api/test', async (req, res) => {
+      try {
+        const result = await this.testConnection();
+        res.json(JSON.parse(result.content[0].text));
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    app.get('/api/campaigns', async (req, res) => {
+      try {
+        const result = await this.getCampaigns();
+        res.json(JSON.parse(result.content[0].text));
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    app.get('/api/campaigns/:campaignId/metrics', async (req, res) => {
+      try {
+        const { campaignId } = req.params;
+        const { start_date, end_date } = req.query;
+        
+        if (!start_date || !end_date) {
+          return res.status(400).json({ error: 'start_date and end_date are required' });
+        }
+
+        const result = await this.getCampaignMetrics(campaignId, start_date, end_date);
+        res.json(JSON.parse(result.content[0].text));
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    const port = process.env.PORT || 8080;
+    app.listen(port, () => {
+      console.log(`🌐 HTTP server running on port ${port}`);
+    });
   }
 }
 
