@@ -17,7 +17,7 @@ class AutomatedTokenManager {
     this.oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_ADS_CLIENT_ID,
       process.env.GOOGLE_ADS_CLIENT_SECRET,
-      'http://localhost:8080/oauth/callback'
+      'urn:ietf:wg:oauth:2.0:oob'
     );
 
     this.tokensFile = './tokens.json';
@@ -43,7 +43,8 @@ class AutomatedTokenManager {
     const authUrl = this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/adwords'],
-      prompt: 'consent'
+      prompt: 'consent',
+      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
     });
 
     console.log('\n=== INITIAL SETUP REQUIRED ===');
