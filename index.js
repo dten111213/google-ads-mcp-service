@@ -28,12 +28,33 @@ class AutomatedTokenManager {
 
   async initializeTokens() {
     try {
-      const tokenData = await fs.readFile(this.tokensFile, 'utf8');
-      this.tokens = JSON.parse(tokenData);
-      this.oauth2Client.setCredentials(this.tokens);
-      
-      console.log('✅ Loaded existing tokens');
-      await this.ensureValidTokens();
+      // Try to load tokens from environment variables (persistent)
+      if (process.env.GOOGLE_ADS_REFRESH_TOKEN) {
+        this.tokens = {
+          refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN,
+          access_token: process.env.GOOGLE_ADS_ACCESS_TOKEN || null,
+          expiry_date: process.env.GOOGLE_ADS_TOKEN_EXPIRY ? parseInt(process.env.GOOGLE_ADS_TOKEN_EXPIRY) : null
+        };
+        this.oauth2Client.setCredentials(this.tokens);
+        
+        console.log('✅ Loaded tokens from environment variables');
+        await this.ensureValidTokens();
+        return;
+      }
+
+      // Fallback to file (temporary)
+      try {
+        const tokenData = await fs.readFile(this.tokensFile, 'utf8');
+        this.tokens = JSON.parse(tokenData);
+        this.oauth2Client.setCredentials(this.tokens);
+        
+        console.log('✅ Loaded existing tokens from file');
+        await this.ensureValidTokens();
+        return;
+      } catch (fileError) {
+        console.log('⚠️ No existing tokens found, need initial setup');
+        await this.performInitialAuth();
+      }
       
     } catch (error) {
       console.log('⚠️ No existing tokens found, need initial setup');
@@ -61,6 +82,7 @@ class AutomatedTokenManager {
       await this.saveTokens(tokens);
       this.oauth2Client.setCredentials(tokens);
       console.log('🎉 Initial authentication complete!');
+      console.log('💾 Tokens saved to environment variables');
       console.log('ℹ️ You can now remove INITIAL_AUTH_CODE from environment variables');
     } else {
       throw new Error('Initial authentication required - check logs for setup instructions');
@@ -90,7 +112,23 @@ class AutomatedTokenManager {
 
   async saveTokens(tokens) {
     this.tokens = { ...this.tokens, ...tokens };
+    
+    // Save to file (temporary - gets deleted on restart)
     await fs.writeFile(this.tokensFile, JSON.stringify(this.tokens, null, 2));
+    
+    // Also save to environment variables for persistence
+    // Note: This only updates the current process, you need to manually add these to Railway
+    if (this.tokens.refresh_token) {
+      console.log('\n🔑 SAVE THESE TO RAILWAY ENVIRONMENT VARIABLES:');
+      console.log(`GOOGLE_ADS_REFRESH_TOKEN=${this.tokens.refresh_token}`);
+      if (this.tokens.access_token) {
+        console.log(`GOOGLE_ADS_ACCESS_TOKEN=${this.tokens.access_token}`);
+      }
+      if (this.tokens.expiry_date) {
+        console.log(`GOOGLE_ADS_TOKEN_EXPIRY=${this.tokens.expiry_date}`);
+      }
+      console.log('=================================\n');
+    }
   }
 
   async getValidAccessToken() {
