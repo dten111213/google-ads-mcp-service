@@ -11,8 +11,8 @@ import {
 import { GoogleAdsApi } from 'google-ads-api';
 import { google } from 'googleapis';
 import fs from 'fs/promises';
-import express from 'express';
-import cors from 'cors';
+import http from 'http';
+import url from 'url';
 
 class AutomatedTokenManager {
   constructor() {
@@ -357,81 +357,55 @@ class GoogleAdsMCPServer {
     }
 
     // Start HTTP server for Claude Projects
-    await this.startHttpServer();
+    this.startHttpServer();
 
-    // Start stdio server for Claude Desktop
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error("🚀 Google Ads MCP server running on stdio and HTTP");
+    console.error("🚀 Google Ads MCP server running on HTTP");
   }
 
-  async startHttpServer() {
-    const app = express();
-    app.use(cors());
-    app.use(express.json());
+  startHttpServer() {
+    const server = http.createServer(async (req, res) => {
+      // Enable CORS
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    // Health check endpoint
-    app.get('/health', (req, res) => {
-      res.json({ status: 'ok', message: 'Google Ads MCP Server is running' });
-    });
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
 
-    // MCP endpoint for Claude Projects
-    app.post('/mcp', async (req, res) => {
+      const parsedUrl = url.parse(req.url, true);
+      res.setHeader('Content-Type', 'application/json');
+
       try {
-        const { method, params } = req.body;
+        if (req.method === 'GET' && parsedUrl.pathname === '/health') {
+          res.writeHead(200);
+          res.end(JSON.stringify({ status: 'ok', message: 'Google Ads MCP Server is running' }));
         
-        if (method === 'tools/list') {
-          const tools = await this.server.getRequestHandler(ListToolsRequestSchema)();
-          res.json(tools);
-        } else if (method === 'tools/call') {
-          const result = await this.server.getRequestHandler(CallToolRequestSchema)(params);
-          res.json(result);
+        } else if (req.method === 'GET' && parsedUrl.pathname === '/api/test') {
+          const result = await this.testConnection();
+          res.writeHead(200);
+          res.end(result.content[0].text);
+        
+        } else if (req.method === 'GET' && parsedUrl.pathname === '/api/campaigns') {
+          const result = await this.getCampaigns();
+          res.writeHead(200);
+          res.end(result.content[0].text);
+        
         } else {
-          res.status(400).json({ error: 'Unknown method' });
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'Not found' }));
         }
       } catch (error) {
         console.error('HTTP request error:', error);
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Google Ads API endpoints for direct HTTP access
-    app.get('/api/test', async (req, res) => {
-      try {
-        const result = await this.testConnection();
-        res.json(JSON.parse(result.content[0].text));
-      } catch (error) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    app.get('/api/campaigns', async (req, res) => {
-      try {
-        const result = await this.getCampaigns();
-        res.json(JSON.parse(result.content[0].text));
-      } catch (error) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    app.get('/api/campaigns/:campaignId/metrics', async (req, res) => {
-      try {
-        const { campaignId } = req.params;
-        const { start_date, end_date } = req.query;
-        
-        if (!start_date || !end_date) {
-          return res.status(400).json({ error: 'start_date and end_date are required' });
-        }
-
-        const result = await this.getCampaignMetrics(campaignId, start_date, end_date);
-        res.json(JSON.parse(result.content[0].text));
-      } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: error.message }));
       }
     });
 
     const port = process.env.PORT || 8080;
-    app.listen(port, () => {
+    server.listen(port, () => {
       console.log(`🌐 HTTP server running on port ${port}`);
     });
   }
