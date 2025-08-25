@@ -1,4 +1,6 @@
-#!/usr/bin/env node
+console.log('1. Visit this URL:', authUrl);
+    console.log('2. Copy the authorization code you receive');
+    console.log('3. Set it as INITIAL_AUTH_CODE environment variable');#!/usr/bin/env node
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -124,15 +126,15 @@ class GoogleAdsMCPServer {
       await this.tokenManager.initializeTokens();
       const accessToken = await this.tokenManager.getValidAccessToken();
       
-      this.googleAdsApi = GoogleAdsApi({
+      this.googleAdsApi = new GoogleAdsApi({
         client_id: process.env.GOOGLE_ADS_CLIENT_ID,
         client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET,
         developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
-        access_token: accessToken,
       });
 
       this.customer = this.googleAdsApi.Customer({
         customer_id: process.env.GOOGLE_ADS_CUSTOMER_ID,
+        refresh_token: this.tokenManager.tokens.refresh_token,
       });
 
       console.log('✅ Google Ads API initialized successfully');
