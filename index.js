@@ -17,7 +17,7 @@ class AutomatedTokenManager {
     this.oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_ADS_CLIENT_ID,
       process.env.GOOGLE_ADS_CLIENT_SECRET,
-      'urn:ietf:wg:oauth:2.0:oob'
+      'http://localhost:3000/auth/callback'
     );
 
     this.tokensFile = './tokens.json';
@@ -43,14 +43,14 @@ class AutomatedTokenManager {
     const authUrl = this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/adwords'],
-      prompt: 'consent',
-      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
+      prompt: 'consent'
     });
 
     console.log('\n=== INITIAL SETUP REQUIRED ===');
     console.log('1. Visit this URL:', authUrl);
-    console.log('2. Copy the code and set it as INITIAL_AUTH_CODE environment variable');
-    console.log('3. Restart the server');
+    console.log('2. Copy the code from the callback URL');
+    console.log('3. Set it as INITIAL_AUTH_CODE environment variable');
+    console.log('4. Restart the server');
     console.log('================================\n');
 
     if (process.env.INITIAL_AUTH_CODE) {
