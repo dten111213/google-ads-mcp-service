@@ -1,6 +1,4 @@
-console.log('1. Visit this URL:', authUrl);
-    console.log('2. Copy the authorization code you receive');
-    console.log('3. Set it as INITIAL_AUTH_CODE environment variable');#!/usr/bin/env node
+#!/usr/bin/env node
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -50,10 +48,9 @@ class AutomatedTokenManager {
 
     console.log('\n=== INITIAL SETUP REQUIRED ===');
     console.log('1. Visit this URL:', authUrl);
-    console.log('2. After approval, you will be redirected to Railway with a code in the URL');
-    console.log('3. Copy the "code=" parameter from the URL');
-    console.log('4. Set it as INITIAL_AUTH_CODE environment variable');
-    console.log('5. Restart the server');
+    console.log('2. Copy the authorization code you receive');
+    console.log('3. Set it as INITIAL_AUTH_CODE environment variable');
+    console.log('4. Restart the server');
     console.log('================================\n');
 
     if (process.env.INITIAL_AUTH_CODE) {
@@ -124,7 +121,6 @@ class GoogleAdsMCPServer {
       console.log('🔧 Initializing Google Ads API...');
       
       await this.tokenManager.initializeTokens();
-      const accessToken = await this.tokenManager.getValidAccessToken();
       
       this.googleAdsApi = new GoogleAdsApi({
         client_id: process.env.GOOGLE_ADS_CLIENT_ID,
