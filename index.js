@@ -17,7 +17,7 @@ class AutomatedTokenManager {
     this.oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_ADS_CLIENT_ID,
       process.env.GOOGLE_ADS_CLIENT_SECRET,
-      'urn:ietf:wg:oauth:2.0:oob' // For server-side apps
+      'urn:ietf:wg:oauth:2.0:oob'
     );
 
     this.tokensFile = './tokens.json';
@@ -26,14 +26,11 @@ class AutomatedTokenManager {
 
   async initializeTokens() {
     try {
-      // Try to load existing tokens
       const tokenData = await fs.readFile(this.tokensFile, 'utf8');
       this.tokens = JSON.parse(tokenData);
       this.oauth2Client.setCredentials(this.tokens);
       
       console.log('✅ Loaded existing tokens');
-      
-      // Check if tokens need refresh
       await this.ensureValidTokens();
       
     } catch (error) {
@@ -43,11 +40,10 @@ class AutomatedTokenManager {
   }
 
   async performInitialAuth() {
-    // Generate auth URL - you only need to do this once manually
     const authUrl = this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/adwords'],
-      prompt: 'consent' // Forces refresh token generation
+      prompt: 'consent'
     });
 
     console.log('\n=== INITIAL SETUP REQUIRED ===');
@@ -56,14 +52,11 @@ class AutomatedTokenManager {
     console.log('3. Restart the server');
     console.log('================================\n');
 
-    // Check if initial code is provided
     if (process.env.INITIAL_AUTH_CODE) {
       const { tokens } = await this.oauth2Client.getToken(process.env.INITIAL_AUTH_CODE);
       await this.saveTokens(tokens);
       this.oauth2Client.setCredentials(tokens);
       console.log('🎉 Initial authentication complete!');
-      
-      // Clear the auth code from environment for security
       console.log('ℹ️ You can now remove INITIAL_AUTH_CODE from environment variables');
     } else {
       throw new Error('Initial authentication required - check logs for setup instructions');
@@ -72,7 +65,6 @@ class AutomatedTokenManager {
 
   async ensureValidTokens() {
     try {
-      // Check if access token is expired or expires soon
       if (!this.tokens.access_token || this.isTokenExpiringSoon()) {
         console.log('🔄 Refreshing access token...');
         const { credentials } = await this.oauth2Client.refreshAccessToken();
@@ -88,8 +80,6 @@ class AutomatedTokenManager {
 
   isTokenExpiringSoon() {
     if (!this.tokens.expiry_date) return true;
-    
-    // Check if token expires in next 5 minutes
     const fiveMinutes = 5 * 60 * 1000;
     return (this.tokens.expiry_date - Date.now()) < fiveMinutes;
   }
@@ -99,7 +89,6 @@ class AutomatedTokenManager {
     await fs.writeFile(this.tokensFile, JSON.stringify(this.tokens, null, 2));
   }
 
-  // Get current valid access token for Google Ads API
   async getValidAccessToken() {
     await this.ensureValidTokens();
     return this.tokens.access_token;
@@ -130,10 +119,7 @@ class GoogleAdsMCPServer {
     try {
       console.log('🔧 Initializing Google Ads API...');
       
-      // Initialize token manager first
       await this.tokenManager.initializeTokens();
-      
-      // Get fresh access token
       const accessToken = await this.tokenManager.getValidAccessToken();
       
       this.googleAdsApi = GoogleAdsApi({
@@ -143,7 +129,6 @@ class GoogleAdsMCPServer {
         access_token: accessToken,
       });
 
-      // Create customer instance
       this.customer = this.googleAdsApi.Customer({
         customer_id: process.env.GOOGLE_ADS_CUSTOMER_ID,
       });
@@ -156,7 +141,6 @@ class GoogleAdsMCPServer {
   }
 
   setupToolHandlers() {
-    // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
@@ -179,3 +163,201 @@ class GoogleAdsMCPServer {
             inputSchema: {
               type: "object",
               properties: {
+                campaign_id: {
+                  type: "string",
+                  description: "Campaign ID to get metrics for",
+                },
+                start_date: {
+                  type: "string",
+                  description: "Start date (YYYY-MM-DD format)",
+                },
+                end_date: {
+                  type: "string",
+                  description: "End date (YYYY-MM-DD format)",
+                },
+              },
+              required: ["campaign_id", "start_date", "end_date"],
+            },
+          },
+          {
+            name: "test_connection",
+            description: "Test the Google Ads API connection",
+            inputSchema: {
+              type: "object",
+              properties: {},
+            },
+          },
+        ],
+      };
+    });
+
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+
+      try {
+        switch (name) {
+          case "test_connection":
+            return await this.testConnection();
+          case "get_campaigns":
+            return await this.getCampaigns(args?.customer_id);
+          case "get_campaign_metrics":
+            return await this.getCampaignMetrics(
+              args.campaign_id,
+              args.start_date,
+              args.end_date
+            );
+          default:
+            throw new McpError(
+              ErrorCode.MethodNotFound,
+              `Unknown tool: ${name}`
+            );
+        }
+      } catch (error) {
+        throw new McpError(
+          ErrorCode.InternalError,
+          `Error executing ${name}: ${error.message}`
+        );
+      }
+    });
+  }
+
+  async testConnection() {
+    try {
+      if (!this.customer) {
+        await this.initializeGoogleAds();
+      }
+
+      const result = await this.customer.query(`
+        SELECT customer.id, customer.descriptive_name
+        FROM customer
+        LIMIT 1
+      `);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "success",
+              message: "Google Ads API connection successful",
+              customer_info: result[0],
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "error",
+              message: "Failed to connect to Google Ads API",
+              error: error.message,
+            }, null, 2),
+          },
+        ],
+      };
+    }
+  }
+
+  async getCampaigns(customerId = null) {
+    try {
+      if (!this.customer) {
+        await this.initializeGoogleAds();
+      }
+
+      await this.tokenManager.ensureValidTokens();
+
+      const query = `
+        SELECT 
+          campaign.id,
+          campaign.name,
+          campaign.status,
+          campaign.advertising_channel_type,
+          campaign.start_date,
+          campaign.end_date
+        FROM campaign
+        ORDER BY campaign.name
+      `;
+
+      const campaigns = await this.customer.query(query);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "success",
+              count: campaigns.length,
+              campaigns: campaigns,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getCampaignMetrics(campaignId, startDate, endDate) {
+    try {
+      if (!this.customer) {
+        await this.initializeGoogleAds();
+      }
+
+      await this.tokenManager.ensureValidTokens();
+
+      const query = `
+        SELECT 
+          campaign.id,
+          campaign.name,
+          metrics.impressions,
+          metrics.clicks,
+          metrics.ctr,
+          metrics.cost_micros,
+          metrics.conversions,
+          metrics.conversion_rate,
+          segments.date
+        FROM campaign
+        WHERE campaign.id = ${campaignId}
+          AND segments.date BETWEEN '${startDate}' AND '${endDate}'
+        ORDER BY segments.date DESC
+      `;
+
+      const metrics = await this.customer.query(query);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "success",
+              campaign_id: campaignId,
+              date_range: { start: startDate, end: endDate },
+              metrics: metrics,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async run() {
+    try {
+      await this.initializeGoogleAds();
+    } catch (error) {
+      console.error('⚠️ Startup initialization failed:', error.message);
+      console.log('📝 Server will retry initialization on first tool call');
+    }
+
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    console.error("🚀 Google Ads MCP server running on stdio");
+  }
+}
+
+const server = new GoogleAdsMCPServer();
+server.run().catch(console.error);
