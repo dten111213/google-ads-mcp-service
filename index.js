@@ -404,8 +404,8 @@ class GoogleAdsMCPServer {
     const server = http.createServer(async (req, res) => {
       // Enable CORS
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Mcp-Session-Id, Last-Event-ID');
 
       if (req.method === 'OPTIONS') {
         res.writeHead(200);
@@ -414,52 +414,46 @@ class GoogleAdsMCPServer {
       }
 
       const parsedUrl = url.parse(req.url, true);
-      res.setHeader('Content-Type', 'application/json');
 
       try {
         // Health check endpoint
         if (req.method === 'GET' && parsedUrl.pathname === '/health') {
+          res.setHeader('Content-Type', 'application/json');
           res.writeHead(200);
           res.end(JSON.stringify({ status: 'ok', message: 'Google Ads MCP Server is running' }));
           return;
         }
 
-        // MCP protocol endpoint
-        if (req.method === 'POST' && (parsedUrl.pathname === '/' || parsedUrl.pathname === '/mcp')) {
-          let body = '';
-          req.on('data', chunk => { body += chunk.toString(); });
-          req.on('end', async () => {
-            try {
-              const message = JSON.parse(body);
-              const response = await this.handleMCPMessage(message);
-              res.writeHead(200);
-              res.end(JSON.stringify(response));
-            } catch (error) {
-              console.error('MCP message error:', error);
-              res.writeHead(500);
-              res.end(JSON.stringify({ 
-                error: { code: -32603, message: 'Internal error', data: error.message } 
-              }));
-            }
-          });
+        // Main MCP endpoint - implements Streamable HTTP transport
+        if (parsedUrl.pathname === '/' || parsedUrl.pathname === '/mcp') {
+          await this.handleMCPEndpoint(req, res);
           return;
         }
 
-        // Simple API endpoints for testing
+        // Legacy API endpoints for direct testing
         if (req.method === 'GET' && parsedUrl.pathname === '/api/test') {
           const result = await this.testConnection();
+          res.setHeader('Content-Type', 'application/json');
           res.writeHead(200);
           res.end(result.content[0].text);
-        } else if (req.method === 'GET' && parsedUrl.pathname === '/api/campaigns') {
-          const result = await this.getCampaigns();
-          res.writeHead(200);
-          res.end(result.content[0].text);
-        } else {
-          res.writeHead(404);
-          res.end(JSON.stringify({ error: 'Not found' }));
+          return;
         }
+
+        if (req.method === 'GET' && parsedUrl.pathname === '/api/campaigns') {
+          const result = await this.getCampaigns();
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(200);
+          res.end(result.content[0].text);
+          return;
+        }
+
+        // Not found
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Not found' }));
+
       } catch (error) {
         console.error('HTTP request error:', error);
+        res.setHeader('Content-Type', 'application/json');
         res.writeHead(500);
         res.end(JSON.stringify({ error: error.message }));
       }
@@ -471,10 +465,90 @@ class GoogleAdsMCPServer {
     });
   }
 
-  async handleMCPMessage(message) {
+  async handleMCPEndpoint(req, res) {
+    const sessionId = req.headers['mcp-session-id'];
+
+    if (req.method === 'POST') {
+      // Handle MCP messages
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const message = JSON.parse(body);
+          const response = await this.handleMCPMessage(message, sessionId);
+          
+          // Add session ID header if provided in response
+          if (response.sessionId) {
+            res.setHeader('Mcp-Session-Id', response.sessionId);
+            delete response.sessionId; // Remove from response body
+          }
+
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(200);
+          res.end(JSON.stringify(response));
+        } catch (error) {
+          console.error('MCP message error:', error);
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(500);
+          res.end(JSON.stringify({ 
+            jsonrpc: '2.0',
+            error: { 
+              code: -32603, 
+              message: 'Internal error', 
+              data: error.message 
+            } 
+          }));
+        }
+      });
+    } else if (req.method === 'GET') {
+      // Handle SSE connection initiation (if needed for streaming)
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.writeHead(200);
+      
+      // Send keep-alive
+      res.write('data: {"type":"ping"}\n\n');
+      
+      // Close connection after a short time (basic implementation)
+      setTimeout(() => {
+        res.end();
+      }, 1000);
+    } else if (req.method === 'DELETE' && sessionId) {
+      // Handle session termination
+      res.writeHead(204);
+      res.end();
+    } else {
+      res.writeHead(405);
+      res.end();
+    }
+  }
+
+  async handleMCPMessage(message, sessionId) {
     const { method, params, id } = message;
 
     try {
+      // Handle initialization
+      if (method === 'initialize') {
+        const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            protocolVersion: '2025-03-26',
+            capabilities: {
+              tools: {},
+            },
+            serverInfo: {
+              name: 'google-ads-mcp-server',
+              version: '0.1.0',
+            }
+          },
+          sessionId: newSessionId // This will be moved to header
+        };
+      }
+
+      // Handle tools listing
       if (method === 'tools/list') {
         return {
           jsonrpc: '2.0',
@@ -529,6 +603,7 @@ class GoogleAdsMCPServer {
         };
       }
 
+      // Handle tool calls
       if (method === 'tools/call') {
         const { name, arguments: args } = params;
         let result;
