@@ -1,4 +1,43 @@
-#!/usr/bin/env node
+async run() {
+    try {
+      await this.initializeGoogleAds();
+    } catch (error) {
+      console.error('⚠️ Startup initialization failed:', error.message);
+      console.log('📝 Server will retry initialization on first tool call');
+    }
+
+    // Start HTTP server for Railway and Claude Projects
+    this.startHttpServer();
+
+    // Keep-alive mechanism for Railway
+    setInterval(() => {
+      console.log(`⏰ Keep-alive ping: ${new Date().toISOString()}`);
+    }, 60000); // Log every minute to show the service is alive
+
+    // Handle process signals gracefully
+    process.on('SIGTERM', () => {
+      console.log('📤 Received SIGTERM, shutting down gracefully');
+      process.exit(0);
+    });
+
+    process.on('SIGINT', () => {
+      console.log('📤 Received SIGINT, shutting down gracefully');
+      process.exit(0);
+    });
+
+    process.on('uncaughtException', (error) => {
+      console.error('💥 Uncaught Exception:', error);
+      // Don't exit on uncaught exceptions - just log them
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+      // Don't exit on unhandled rejections - just log them
+    });
+
+    console.error("🚀 Google Ads MCP server running on HTTP");
+    console.error("🔄 Keep-alive mechanism active - server will log every minute");
+  }#!/usr/bin/env node
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
