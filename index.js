@@ -417,20 +417,43 @@ class GoogleAdsMCPServer {
       res.setHeader('Content-Type', 'application/json');
 
       try {
+        // Health check endpoint
         if (req.method === 'GET' && parsedUrl.pathname === '/health') {
           res.writeHead(200);
           res.end(JSON.stringify({ status: 'ok', message: 'Google Ads MCP Server is running' }));
-        
-        } else if (req.method === 'GET' && parsedUrl.pathname === '/api/test') {
+          return;
+        }
+
+        // MCP protocol endpoint
+        if (req.method === 'POST' && (parsedUrl.pathname === '/' || parsedUrl.pathname === '/mcp')) {
+          let body = '';
+          req.on('data', chunk => { body += chunk.toString(); });
+          req.on('end', async () => {
+            try {
+              const message = JSON.parse(body);
+              const response = await this.handleMCPMessage(message);
+              res.writeHead(200);
+              res.end(JSON.stringify(response));
+            } catch (error) {
+              console.error('MCP message error:', error);
+              res.writeHead(500);
+              res.end(JSON.stringify({ 
+                error: { code: -32603, message: 'Internal error', data: error.message } 
+              }));
+            }
+          });
+          return;
+        }
+
+        // Simple API endpoints for testing
+        if (req.method === 'GET' && parsedUrl.pathname === '/api/test') {
           const result = await this.testConnection();
           res.writeHead(200);
           res.end(result.content[0].text);
-        
         } else if (req.method === 'GET' && parsedUrl.pathname === '/api/campaigns') {
           const result = await this.getCampaigns();
           res.writeHead(200);
           res.end(result.content[0].text);
-        
         } else {
           res.writeHead(404);
           res.end(JSON.stringify({ error: 'Not found' }));
@@ -446,6 +469,107 @@ class GoogleAdsMCPServer {
     server.listen(port, () => {
       console.log(`🌐 HTTP server running on port ${port}`);
     });
+  }
+
+  async handleMCPMessage(message) {
+    const { method, params, id } = message;
+
+    try {
+      if (method === 'tools/list') {
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            tools: [
+              {
+                name: "get_campaigns",
+                description: "Get all campaigns from Google Ads account",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    customer_id: {
+                      type: "string",
+                      description: "Google Ads customer ID (optional, uses default if not provided)",
+                    },
+                  },
+                },
+              },
+              {
+                name: "get_campaign_metrics",
+                description: "Get performance metrics for campaigns",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    campaign_id: {
+                      type: "string",
+                      description: "Campaign ID to get metrics for",
+                    },
+                    start_date: {
+                      type: "string",
+                      description: "Start date (YYYY-MM-DD format)",
+                    },
+                    end_date: {
+                      type: "string",
+                      description: "End date (YYYY-MM-DD format)",
+                    },
+                  },
+                  required: ["campaign_id", "start_date", "end_date"],
+                },
+              },
+              {
+                name: "test_connection",
+                description: "Test the Google Ads API connection",
+                inputSchema: {
+                  type: "object",
+                  properties: {},
+                },
+              },
+            ],
+          }
+        };
+      }
+
+      if (method === 'tools/call') {
+        const { name, arguments: args } = params;
+        let result;
+
+        switch (name) {
+          case "test_connection":
+            result = await this.testConnection();
+            break;
+          case "get_campaigns":
+            result = await this.getCampaigns(args?.customer_id);
+            break;
+          case "get_campaign_metrics":
+            result = await this.getCampaignMetrics(
+              args.campaign_id,
+              args.start_date,
+              args.end_date
+            );
+            break;
+          default:
+            throw new Error(`Unknown tool: ${name}`);
+        }
+
+        return {
+          jsonrpc: '2.0',
+          id,
+          result
+        };
+      }
+
+      throw new Error(`Unknown method: ${method}`);
+    } catch (error) {
+      return {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32603,
+          message: 'Internal error',
+          data: error.message
+        }
+      };
+    }
   }
 }
 
