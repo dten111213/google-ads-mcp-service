@@ -394,8 +394,14 @@ class GoogleAdsMCPServer {
       console.log('📝 Server will retry initialization on first tool call');
     }
 
-    // Start HTTP server for Claude Projects
+    // Start HTTP server for Railway and Claude Projects
     this.startHttpServer();
+
+    // Keep the process alive
+    process.on('SIGTERM', () => {
+      console.log('Received SIGTERM, shutting down gracefully');
+      process.exit(0);
+    });
 
     console.error("🚀 Google Ads MCP server running on HTTP");
   }
@@ -421,6 +427,24 @@ class GoogleAdsMCPServer {
           res.setHeader('Content-Type', 'application/json');
           res.writeHead(200);
           res.end(JSON.stringify({ status: 'ok', message: 'Google Ads MCP Server is running' }));
+          return;
+        }
+
+        // Root endpoint for Railway
+        if (req.method === 'GET' && parsedUrl.pathname === '/') {
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(200);
+          res.end(JSON.stringify({ 
+            name: 'Google Ads MCP Server',
+            status: 'running',
+            version: '0.1.0',
+            endpoints: {
+              health: '/health',
+              mcp: '/mcp',
+              test: '/api/test',
+              campaigns: '/api/campaigns'
+            }
+          }));
           return;
         }
 
